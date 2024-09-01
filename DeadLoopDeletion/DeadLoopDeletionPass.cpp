@@ -44,8 +44,7 @@ namespace {
         //     // todo 
         // }
 
-
-        bool isLoopDead(Loop* L, SmallVectorImpl<BasicBlock *> &ExitingBlocks, BasicBlock *ExitBlock, bool &Changed, BasicBlock *Preheader) {
+        bool isLoopDead(Loop* L, SmallVectorImpl<BasicBlock *> &ExitingBlocks, bool &Changed, BasicBlock *ExitBlock, BasicBlock *Preheader) {
             BasicBlock::iterator BI = ExitBlock->begin();
             bool AllEntriesInvariant = true;
             bool AllOutgoingValuesSame = true;
@@ -71,16 +70,13 @@ namespace {
                 ++BI;
             }
 
-            bool hasSideEffects(Instruction &I) {
-                return I.mayHaveSideEffects();
-            }
-
-            for (auto &block : L->blocks()) {
-                if (any_of(block->begin(), block->end(), hasSideEffects)) {
-                    return false;
+            for (auto *Block : L->blocks()) {
+                for (auto &I : *Block) {
+                    if (I.mayHaveSideEffects()) {
+                        return false;
+                    }
                 }
             }
-
             return true;
         }
 
@@ -89,30 +85,56 @@ namespace {
         bool makesNoProgramStateChanges(Loop *L) {
             // todo
         }
-        
+
+
+        // TODO
+        void deleteDeadLoop(Loop *L, DominatorTree &DT, LoopInfo& LI)
+        {
+
+        }
         
 
-        bool deleteLoopIfDead(Loop* L, LoopInfo& LI) {
+        bool deleteLoopIfDead(Loop* L, DominatorTree &DT, LoopInfo& LI) {
+            assert(L->isLCSSAForm(DT) && "Expected LCSSA!");
+
+            BasicBlock *Preheader = L->getLoopPreheader();
+            if (!Preheader || !L->hasDedicatedExits())
+                return false;
+
+            // subloops TODO
+
+            // loop mora da ima exit block
+            BasicBlock *ExitBlock = L->getUniqueExitBlock();
+            SmallVector<BasicBlock *, 4> ExitingBlocks;
+            L->getExitingBlocks(ExitingBlocks);
+
+            if (!ExitBlock) {
+                return false; // required single exit block
+            }
+
+            // Finally, we have to check that the loop really is dead.
+            bool Changed = false;
+            if(!isLoopDead(L, ExitingBlocks, Changed, ExitBlock, Preheader))
+                return false; // loop is not invariant, cannot delete
+
 
             // if (isLoopNeverExecuted(L) && makesNoProgramStateChanges(L) && !hasSideEffects(L)) {
             //     L->getParentLoop()->removeChildLoop(L);
             //     return true;
             // }
+            deleteDeadLoop(L, DT, LI);
             return false;
         }
 
-
-
-        
         bool runOnLoop(Loop *L, LPPassManager &LPM) override {
             printf("[SOON] This pass will delete dead loops!\n");
 
+            DominatorTree &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
             LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
 
-            bool Result = deleteLoopIfDead(L, LI);
+            bool Result = deleteLoopIfDead(L, DT, LI);
 
             // analysis?
-
 
             // Result == obrisana petlja promenjen IR
             return Result;
