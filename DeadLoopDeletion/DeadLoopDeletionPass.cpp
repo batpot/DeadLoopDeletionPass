@@ -79,22 +79,58 @@ namespace {
             }
             return true;
         }
-
-
-
         bool makesNoProgramStateChanges(Loop *L) {
             // todo
         }
 
 
         // TODO
-        void deleteDeadLoop(Loop *L, DominatorTree &DT, LoopInfo& LI)
+        void deleteDeadLoop(Loop *L, DominatorTree &DT, LoopInfo& LI, ScalarEvolution &SE)
         {
+            auto *Preheader = L->getLoopPreheader();
+            assert(Preheader && "Preheader should exist!");
+
+            SE.forgetLoop(L);
+
+            auto *ExitBlock = L->getUniqueExitBlock();
+            if (!ExitBlock) {
+                errs() << "Error: Loop does not have a unique exit block! Cannot proceed with the transformation.\n";
+                return;
+            }
+            if (!L->hasDedicatedExits()) {
+                errs() << "Error: Loop does not have dedicated exits! The loop might need to be simplified first.\n";
+                return;
+            }
+
+            // prespajamo instrukcije tako da se terminirajuca instrukcija u preheader-u nastavlja direktno na exitblock loop-a
+            Preheader->getTerminator()->replaceUsesOfWith(L->getHeader(), ExitBlock);
+
+            BasicBlock::iterator BI = ExitBlock->begin();
+            while (PHINode *P = dyn_cast<PHINode>(BI)) {
+                int PredIndex = 0;
+                P->setIncomingBlock(PredIndex, Preheader);
+
+                // kad brisemo petlju, moramo da obrisemo PHI instrukcije koje su se objedinjavale iz razlicitih exit blokova da bi IR ostao validan
+                // brise se unazad zbog siftovanja indeksa kada se brisu PHI cvorovi
+                unsigned numIncomingValues = P->getNumIncomingValues();
+
+                while (numIncomingValues > 1) {
+                    P->removeIncomingValue(numIncomingValues - 1, false);
+                    --numIncomingValues;
+                }
+
+                //PHINode treba da ima samo jednog prethodnika i incoming vrednost za PredIndex blok treba da bude Preheader
+                bool hasSingleIncomingValue = (numIncomingValues == 1);
+                bool hasCorrectIncomingBlock = (P->getIncomingBlock(PredIndex) == Preheader);
+
+                if (!hasSingleIncomingValue || !hasCorrectIncomingBlock)
+                    return;
+                BI++;
+            }
 
         }
-        
 
-        bool deleteLoopIfDead(Loop* L, DominatorTree &DT, LoopInfo& LI) {
+        bool deleteLoopIfDead(Loop* L, DominatorTree &DT, LoopInfo& LI, ScalarEvolution &SE) {
             assert(L->isLCSSAForm(DT) && "Expected LCSSA!");
 
             BasicBlock *Preheader = L->getLoopPreheader();
@@ -122,7 +158,7 @@ namespace {
             //     L->getParentLoop()->removeChildLoop(L);
             //     return true;
             // }
-            deleteDeadLoop(L, DT, LI);
+            deleteDeadLoop(L, DT, LI, SE);
             return false;
         }
 
