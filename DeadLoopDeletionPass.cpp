@@ -2,8 +2,14 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/PatternMatch.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopUnrollAnalyzer.h"
+#include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils.h"
@@ -12,33 +18,35 @@
 #include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Utils/SizeOpts.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
-
-#include "llvm/Pass.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/IR/CFG.h"
-#include "llvm/IR/PatternMatch.h"
-
-
-#include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/IR/IRBuilder.h"
 
 
 #include <iostream>
 
 using namespace llvm;
 
-
-
 namespace {
     struct DeadLoopDeletionPass : public LoopPass {
         std::vector<BasicBlock *> LoopBasicBlocks;
+        std::unordered_map<Value *, Value *> VariablesMap;
+    	Value *LoopCounter, *LoopBound;
+    	bool isLoopBoundConst;
+    	int BoundValue;
 
         static char ID;
         DeadLoopDeletionPass() : LoopPass(ID) {}
-
+        
+        void mapVariables(Loop *L)
+  		{
+    		Function *F = L->getHeader()->getParent();
+    		for (BasicBlock &BB : *F) {
+      			for (Instruction &I : BB) {
+        			if (isa<LoadInst>(&I)) {
+          				VariablesMap[&I] = I.getOperand(0);
+        			}
+      			}
+    		}
+  		}
 
         // brisemo petlje koje 
         // - nikad se ne izvrsavaju 
@@ -74,8 +82,7 @@ namespace {
 
         //     return true;
         // }         
-
-            
+           
         
         // brise petlju skroz 
         void DeleteDeadLoop(Loop *L) {
@@ -88,7 +95,37 @@ namespace {
                 BB->eraseFromParent();
             }
         }
-
+        
+        // PROVERA ZA LOOP KOJI SE NIKAD NE IZVRSAVA
+        
+        void findLoopCounterAndBound(Loop *L)
+        {
+        	for (Instruction &I : *L->getHeader()) {
+        		if (isa<ICmpInst>(&I)) {
+        			LoopCounter = VariablesMap[I.getOperand(0)];
+        			if (ConstantInt *ConstInt = dyn_cast<ConstantInt>(I.getOperand(1))) {
+        				isLoopBoundConst = true;
+        				BoundValue = ConstInt->getSExtValue();
+        			}
+        		}
+        	}
+        }
+        
+        bool isNeverExecuted(Loop *L)
+        {
+        	// TODO uopsti da ceo uslov bude neki false condition kao sto je i<0, mozda cak i na manje od 0??
+			if(BoundValue == 0)
+           	{
+            	//errs() << "isNeverExecuted: true" << "\n";
+           		return true;
+            }
+            else
+            {
+            	//errs() << "isNeverExecuted: false, BoundValue=" << BoundValue << "\n";
+              	return false;
+			}
+        }
+        
 
         bool deleteLoopIfDead(Loop* L) {
             BasicBlock *Preheader = L->getLoopPreheader();
@@ -105,14 +142,21 @@ namespace {
             // if(!isLoopDead(L))
             //     return false; // loop is not invariant, cannot delete
 
-            // uvek brisemo (treba dodati uslove za brisanje, sad samo isprobavam da li se petlja uopste brise pomocu DeleteDeadLoop)
-            DeleteDeadLoop(L);
-            return true;
+            if(isNeverExecuted(L))
+            {
+            	//errs() << "loop u f-ji: " << L->getHeader()->getParent()->getName().str()	<< " se nikad ne izvrsava" << "\n";
+            	DeleteDeadLoop(L);
+            	return true;
+            }
+
+			return false;
         }
 
 
         bool runOnLoop(Loop *L, LPPassManager &LPM) override {
-            //printf("[SOON] This pass will delete dead loops!\n");            
+            //printf("[SOON] This pass will delete dead loops!\n");  
+            mapVariables(L); 
+            findLoopCounterAndBound(L);         
 
             LoopBasicBlocks = L->getBlocksVector();
             // printf("eeeeeeeeee: %d\n", (int)LoopBasicBlocks.size());
