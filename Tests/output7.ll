@@ -4,80 +4,42 @@ target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16
 target triple = "x86_64-unknown-linux-gnu"
 
 @.str = private unnamed_addr constant [18 x i8] c"nece obrisati ovu\00", align 1
-@.str.1 = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
-@.str.2 = private unnamed_addr constant [1 x i8] zeroinitializer, align 1
-@.str.3 = private unnamed_addr constant [3 x i8] c"ll\00", align 1
 
 ; Function Attrs: noinline nounwind optnone uwtable
 define dso_local i32 @main() #0 {
   %1 = alloca i32, align 4
   %2 = alloca i32, align 4
-  %3 = alloca i32, align 4
-  %4 = alloca i32, align 4
-  %5 = alloca i32, align 4
-  %6 = alloca i32, align 4
   store i32 0, ptr %1, align 4
   store i32 0, ptr %2, align 4
-  br label %7
+  br label %3
 
-7:                                                ; preds = %13, %0
-  %8 = load i32, ptr %2, align 4
-  %9 = icmp slt i32 %8, 10
-  br i1 %9, label %10, label %16
+3:                                                ; preds = %13, %0
+  %4 = load i32, ptr %2, align 4
+  %5 = icmp slt i32 %4, 10
+  br i1 %5, label %6, label %16
 
-10:                                               ; preds = %7
-  %11 = call i32 (ptr, ...) @printf(ptr noundef @.str)
+6:                                                ; preds = %3
+  %7 = call i32 (ptr, ...) @printf(ptr noundef @.str)
   br label %12
 
-12:                                               ; preds = %10
+8:                                                ; preds = %11
+  %9 = load i32, ptr %2, align 4
+  %10 = icmp slt i32 %9, 5
+  br i1 %10, label %11, label %12
+
+11:                                               ; preds = %8
+  br label %8, !llvm.loop !6
+
+12:                                               ; preds = %6, %8
   br label %13
 
 13:                                               ; preds = %12
   %14 = load i32, ptr %2, align 4
   %15 = add nsw i32 %14, 1
   store i32 %15, ptr %2, align 4
-  br label %7, !llvm.loop !6
+  br label %3, !llvm.loop !8
 
-16:                                               ; preds = %7
-  store i32 0, ptr %3, align 4
-  br label %17
-
-17:                                               ; preds = %31, %16
-  %18 = load i32, ptr %3, align 4
-  %19 = icmp slt i32 %18, 10
-  br i1 %19, label %20, label %34
-
-20:                                               ; preds = %17
-  %21 = call i32 (ptr, ...) @printf(ptr noundef @.str)
-  br label %22
-
-22:                                               ; preds = %25, %20
-  %23 = load i32, ptr %3, align 4
-  %24 = icmp slt i32 %23, 5
-  br i1 %24, label %25, label %30
-
-25:                                               ; preds = %22
-  %26 = load i32, ptr %3, align 4
-  %27 = add nsw i32 %26, 1
-  store i32 %27, ptr %4, align 4
-  %28 = load i32, ptr %4, align 4
-  %29 = call i32 (ptr, ...) @printf(ptr noundef @.str.1, i32 noundef %28)
-  br label %22, !llvm.loop !8
-
-30:                                               ; preds = %22
-  br label %31
-
-31:                                               ; preds = %30
-  %32 = load i32, ptr %3, align 4
-  %33 = add nsw i32 %32, 1
-  store i32 %33, ptr %3, align 4
-  br label %17, !llvm.loop !9
-
-34:                                               ; preds = %17
-  store i32 0, ptr %5, align 4
-  br label %35
-
-35:                                               ; preds = %34
+16:                                               ; preds = %3
   ret i32 0
 }
 
@@ -98,4 +60,3 @@ attributes #1 = { "frame-pointer"="all" "no-trapping-math"="true" "stack-protect
 !6 = distinct !{!6, !7}
 !7 = !{!"llvm.loop.mustprogress"}
 !8 = distinct !{!8, !7}
-!9 = distinct !{!9, !7}

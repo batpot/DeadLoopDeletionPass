@@ -1,45 +1,21 @@
-; ModuleID = '7.c'
-source_filename = "7.c"
+; ModuleID = '11.ll'
+source_filename = "11.c"
 target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
 
-@.str = private unnamed_addr constant [18 x i8] c"nece obrisati ovu\00", align 1
+@.str = private unnamed_addr constant [1 x i8] zeroinitializer, align 1
+@.str.1 = private unnamed_addr constant [3 x i8] c"ll\00", align 1
 
 ; Function Attrs: noinline nounwind optnone uwtable
 define dso_local i32 @main() #0 {
   %1 = alloca i32, align 4
   %2 = alloca i32, align 4
+  %3 = alloca i32, align 4
   store i32 0, ptr %1, align 4
   store i32 0, ptr %2, align 4
-  br label %3
+  br label %4
 
-3:                                                ; preds = %13, %0
-  %4 = load i32, ptr %2, align 4
-  %5 = icmp slt i32 %4, 10
-  br i1 %5, label %6, label %16
-
-6:                                                ; preds = %3
-  %7 = call i32 (ptr, ...) @printf(ptr noundef @.str)
-  br label %8
-
-8:                                                ; preds = %11, %6
-  %9 = load i32, ptr %2, align 4
-  %10 = icmp slt i32 %9, 5
-  br i1 %10, label %11, label %12
-
-11:                                               ; preds = %8
-  br label %8, !llvm.loop !6
-
-12:                                               ; preds = %8
-  br label %13
-
-13:                                               ; preds = %12
-  %14 = load i32, ptr %2, align 4
-  %15 = add nsw i32 %14, 1
-  store i32 %15, ptr %2, align 4
-  br label %3, !llvm.loop !8
-
-16:                                               ; preds = %3
+4:                                                ; preds = %0
   ret i32 0
 }
 
@@ -57,6 +33,3 @@ attributes #1 = { "frame-pointer"="all" "no-trapping-math"="true" "stack-protect
 !3 = !{i32 7, !"uwtable", i32 2}
 !4 = !{i32 7, !"frame-pointer", i32 2}
 !5 = !{!"clang version 17.0.0"}
-!6 = distinct !{!6, !7}
-!7 = !{!"llvm.loop.mustprogress"}
-!8 = distinct !{!8, !7}
