@@ -120,16 +120,18 @@ namespace {
             return false;
         }
 
-        Value* ResolveToBaseVariable(Value *val) {
+
+        Value* Resolve(Value *val) {
             if (LoadInst *loadInst = dyn_cast<LoadInst>(val)) {
                 Value *ptr = loadInst->getPointerOperand();
-                return ResolveToBaseVariable(ptr); // Rekurzivno prati do osnovne promenljive
+                return Resolve(ptr); // Rekurzivno prati do osnovne promenljive
             }
             if(FinalValues[val])
                 return FinalValues[val];
 
             return val; // Ako nije load instrukcija, vrati trenutnu vrednost
         }
+
 
         bool isUseful(Value *I) { 
             if (auto *op = dyn_cast<BinaryOperator>(I)) {
@@ -169,23 +171,6 @@ namespace {
         }
 
 
-        bool shouldDelete() {
-            for (const auto &entry : VariablesMap) {
-                Value *InitialValue = entry.second;
-
-                Value *ResolvedPtr = ResolveToBaseVariable(InitialValue);
-
-                // errs() << "Valueeeeeee: " << *InitialPtr << "\n";
-                // errs() << "Mapped tooo: " << *InitialValue << "\n";
-                // errs() << "Resolved to: " << *ResolvedPtr << "\n\n";
-
-                if(isUseful(ResolvedPtr))
-                    return false;
-            }
-            
-            return true;  // Vrednosti su ostale iste
-        }
-
         bool hasArithmeticOperations()
         {
           // ako ima samo store brisemo
@@ -205,28 +190,47 @@ namespace {
             return false;
         }
 
-        bool DeleteLoopIfDead(Loop *L) {//false ako ne brisemo
+
+        bool shouldDelete(Loop *L) {
             if(isNeverExecuted(L))
-            {
-                DeleteDeadLoop(L);
                 return true;
-            }
 
             if(checkIfHasCall())
                 return false;   // petlja ima poziv printf pa nije dead loop
 
-            if(hasArithmeticOperations() && !shouldDelete())
-              return false; // ako vrati true, to znaci da ima aritmeticke operacije i da ne brisemo
 
-            DeleteDeadLoop(L);
-            return true;
+            for (const auto &entry : VariablesMap) {
+                Value *InitialValue = entry.second;
+                Value *ResolvedPtr = Resolve(InitialValue);
+
+                // errs() << "Valueeeeeee: " << *InitialPtr << "\n";
+                // errs() << "Mapped tooo: " << *InitialValue << "\n";
+                // errs() << "Resolved to: " << *ResolvedPtr << "\n\n";
+
+                if(!isUseful(ResolvedPtr))
+                    return true;
+            }
+
+            if(hasArithmeticOperations())    // ako ovde vrati true, to znaci da ima aritmeticke operacije koje su korisne
+                return false;
+            
+            return true;  // Vrednosti su ostale iste
+        }
+
+        
+
+        bool DeleteLoopIfDead(Loop *L) {//false ako ne brisemo
+            if(shouldDelete(L)) {
+                DeleteDeadLoop(L);
+                return true;
+            }
+                
+            return false;
         }
 
         
         // brise petlju skroz 
         void DeleteDeadLoop(Loop *L) {
-            std::vector<BasicBlock *> LoopBodyBasicBlocks(LoopBasicBlocks.size() - 2);
-            std::copy(LoopBasicBlocks.begin() + 1, LoopBasicBlocks.end() - 1, LoopBodyBasicBlocks.begin()); // [)
 
             L->getLoopPreheader()->getTerminator()->setSuccessor(0, L->getExitBlock());
             
@@ -242,8 +246,6 @@ namespace {
 
             bool BranchingHeader = false;
             bool UncondBranchLatch = true;
-
-            
             
             if (isa<BranchInst>(header->getTerminator())) {
                 BranchingHeader = true;
@@ -260,6 +262,18 @@ namespace {
         bool runOnLoop(Loop *L, LPPassManager &LPM) override {
             VariablesMap.clear();
             FinalValues.clear();
+
+            Loop *ParentLoop = L->getParentLoop();
+    
+            if (ParentLoop) {
+                // errs() << "daaaaaa!\n";
+                // ako brisemo roditeljsku petlju nezavisno od ove(npr ima brojac 0) onda sigurno brisemo i ovu
+                if(shouldDelete(ParentLoop)) {
+                    DeleteDeadLoop(L);
+                    std::cout << "\n petlja JE obrisana\n";
+                    return true;
+                }
+            } 
 
             LoopBodyBasicBlocks.clear();
             LoopBasicBlocks = L->getBlocksVector();
