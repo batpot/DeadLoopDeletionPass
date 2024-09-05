@@ -104,8 +104,8 @@ namespace {
                     if (StoreInst *storeInst = dyn_cast<StoreInst>(&I)) {
                         Value *ptr = storeInst->getOperand(1);      
                         Value *value = storeInst->getOperand(0); // Vrednost koja se upisuje
-                        // errs() << "FINAL VAAAAL : " << *ptr << "\n";
-                        // errs() << "FV MAPPED TO: " << *value << "\n";
+                        errs() << "FINAL VAAAAL : " << *ptr << "\n";
+                        errs() << "FV MAPPED TO: " << *value << "\n";
                         FinalValues[ptr] = value;
                     }
                 }
@@ -171,12 +171,12 @@ namespace {
             for (const auto &entry : VariablesMap) {
                 Value *InitialPtr = entry.first;
                 Value *InitialValue = entry.second;
-                // errs() << "Valueeeeeeeeee: " << *InitialPtr << "\n";
-                // errs() << "Mapped toooooo: " << *InitialValue << "\n";
+                errs() << "Valueeeeeeeeee: " << *InitialPtr << "\n";
+                errs() << "Mapped toooooo: " << *InitialValue << "\n";
 
                 Value *ResolvedPtr = ResolveToBaseVariable(InitialValue);
 
-                // errs() << "Resolved toooo: " << *ResolvedPtr << "\n";
+                errs() << "Resolved toooo: " << *ResolvedPtr << "\n";
 
                 if (FinalValues.find(ResolvedPtr) != FinalValues.end()) {
                     if(isUseful(FinalValues[ResolvedPtr]))
@@ -218,7 +218,6 @@ namespace {
             FinalValues.clear();
 
             LoopBodyBasicBlocks.clear();
-
             LoopBasicBlocks = L->getBlocksVector();
 
             BasicBlock *Header = L->getHeader();
@@ -226,15 +225,14 @@ namespace {
 
             // sredisnji blokovi bez header i latch
             for (BasicBlock *BB : LoopBasicBlocks) {
-                if (BB != Latch) {
+                if (BB != Header && BB != Latch) {
                     LoopBodyBasicBlocks.push_back(BB);
                 }
             }
 
-            //printf("%d aaaaa\n", LoopBodyBasicBlocks.size());
+            printf("%d aaaaa\n", LoopBodyBasicBlocks.size());
 
             mapVariables();
-
             saveFinalValues();
 
             bool res = DeleteLoopIfDead(L);
