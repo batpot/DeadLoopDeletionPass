@@ -41,6 +41,8 @@ namespace {
         std::unordered_map<Value *, Value *> VariablesMap;
         std::unordered_map<Value *, Value *> FinalValues;
 
+    	int BoundValue;
+
         static char ID;
         DeadLoopDeletionPass() : LoopPass(ID) {}
 
@@ -62,8 +64,8 @@ namespace {
                     if (StoreInst *storeInst = dyn_cast<StoreInst>(&I)) {
                         Value *ptr = storeInst->getOperand(1);      
                         Value *value = storeInst->getOperand(0); // Vrednost koja se upisuje
-                        errs() << "FINAL VAAAAL : " << *ptr << "\n";
-                        errs() << "FV MAPPED TO: " << *value << "\n\n";
+                        //errs() << "FINAL VAAAAL : " << *ptr << "\n";
+                        //errs() << "FV MAPPED TO: " << *value << "\n\n";
                         FinalValues[ptr] = value;
                     }
                 }
@@ -74,6 +76,25 @@ namespace {
         // - nikad se ne izvrsavaju 
         // - se izvrsavaju ali ne uticu na rezultat 
         // - nemaju bocne efekte
+
+        // PROVERA ZA LOOP KOJI SE NIKAD NE IZVRSAVA
+
+        void findLoopCounterAndBound(Loop *L)
+        {
+        	for (Instruction &I : *L->getHeader()) {
+        		if (isa<ICmpInst>(&I)) {
+        			if (ConstantInt *ConstInt = dyn_cast<ConstantInt>(I.getOperand(1)))
+        				BoundValue = ConstInt->getSExtValue();
+        		}
+        	}
+        }
+
+        bool isNeverExecuted(Loop *L)
+        {
+            // TODO uopsti da ceo uslov bude neki false condition kao sto je i<0
+			return (BoundValue == 0) ? true : false;
+			
+        }
 
 
         void printVariablesMap() {
@@ -191,13 +212,40 @@ namespace {
             return true;  // Vrednosti su ostale iste
         }
 
+        bool hasArithmeticOperations()
+        {
+          // ako ima samo store brisemo
+            for (BasicBlock *BB : LoopBodyBasicBlocks) {
+                for (Instruction &I : *BB) {
+                    if (isa<BinaryOperator>(&I)) {
+                        if (isa<AddOperator>(&I) || isa<MulOperator>(&I)
+                              || isa<SDivOperator>(&I) || isa<SubOperator>(&I)) {
+                            //errs() << "ima add ili mul ili div ili sub" << "\n";
+                            return true; // ne brisemo
+                        }
 
-        bool DeleteLoopIfDead(Loop *L) {
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        bool DeleteLoopIfDead(Loop *L) {//false ako ne brisemo
+            if(isNeverExecuted(L))
+            {
+                DeleteDeadLoop(L);
+                return true;
+            }
+
             if(checkIfHasCall())
                 return false;   // petlja ima poziv printf pa nije dead loop
 
             if(!shouldDelete())
                 return false;   // ako su se vrednosti menjale checkIfValuesChanged vraca true pa ne treba da brisemo petlju
+
+            if(hasArithmeticOperations())
+              return false; // ako vrati true, to znaci da ima aritmeticke operacije i da ne brisemo
 
             DeleteDeadLoop(L);
             return true;
@@ -215,10 +263,6 @@ namespace {
                 BB->eraseFromParent();
             }
         }
-
-
-        
-
 
         bool isWhileLoop(Loop *L) {
             BasicBlock *header = L->getHeader();
@@ -263,8 +307,6 @@ namespace {
             return false; // Ako nema strukture do-while petlje
         }
 
-
-
         bool runOnLoop(Loop *L, LPPassManager &LPM) override {
             VariablesMap.clear();
             FinalValues.clear();
@@ -275,6 +317,8 @@ namespace {
             BasicBlock *Header = L->getHeader();
             BasicBlock *Latch = L->getLoopLatch();
 
+            findLoopCounterAndBound(L);
+
             for (BasicBlock *BB : LoopBasicBlocks) {
                 if (BB != Header && BB != Latch) {
                     LoopBodyBasicBlocks.push_back(BB);
@@ -283,18 +327,15 @@ namespace {
 
             if(LoopBodyBasicBlocks.size() < 1){
                 if(isWhileLoop(L)) {
-                    errs() << "WHILE!!!\n\n";
+                    //errs() << "WHILE!!!\n\n";
                     LoopBodyBasicBlocks.push_back(Latch);
                     
                 } else if (isDoWhile(L)) {
-                    errs() << "DO WHILE\n\n";
+                    //errs() << "DO WHILE\n\n";
                     LoopBodyBasicBlocks.push_back(Header);      
                 }
 
             }
-
-            
-
 
             // printVariablesMap();
 
