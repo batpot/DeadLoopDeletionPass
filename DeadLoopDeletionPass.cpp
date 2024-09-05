@@ -97,31 +97,6 @@ namespace {
         }
 
 
-        void printVariablesMap() {
-            // Prolazi kroz mapu i ispisuje sve parove ključ-vrednost
-            for (const auto &entry : VariablesMap) {
-                Value *fst = entry.first;
-                Value *value = entry.second;
-                
-                // Ispisuje adresu instrukcije i vrednost (operand)
-                errs() << "Value: " << *fst << "\n";
-                errs() << "Mapped to: " << *value << "\n";
-            }
-        }
-
-        void printFinalValuesMap() {
-            // Prolazi kroz mapu i ispisuje sve parove ključ-vrednost
-            for (const auto &entry : FinalValues) {
-                Value *fst = entry.first;
-                Value *value = entry.second;
-                
-                // Ispisuje adresu instrukcije i vrednost (operand)
-                errs() << "Value: " << *fst << "\n";
-                errs() << "Mapped to: " << *value << "\n";
-            }
-        }
-
-
         bool isConstInt(Value *Operand)
         {
             return isa<ConstantInt>(Operand);
@@ -137,7 +112,7 @@ namespace {
         bool checkIfHasCall() {
             for (BasicBlock *BB : LoopBodyBasicBlocks) {
                 for (Instruction &I : *BB) {
-                    if (auto *Call = dyn_cast<CallInst>(&I)) {
+                    if(isa<CallInst>(&I)) {
                         return true;
                     }
                 }
@@ -196,7 +171,6 @@ namespace {
 
         bool shouldDelete() {
             for (const auto &entry : VariablesMap) {
-                Value *InitialPtr = entry.first;
                 Value *InitialValue = entry.second;
 
                 Value *ResolvedPtr = ResolveToBaseVariable(InitialValue);
@@ -241,10 +215,7 @@ namespace {
             if(checkIfHasCall())
                 return false;   // petlja ima poziv printf pa nije dead loop
 
-            if(!shouldDelete())
-                return false;   // ako su se vrednosti menjale checkIfValuesChanged vraca true pa ne treba da brisemo petlju
-
-            if(hasArithmeticOperations())
+            if(hasArithmeticOperations() && !shouldDelete())
               return false; // ako vrati true, to znaci da ima aritmeticke operacije i da ne brisemo
 
             DeleteDeadLoop(L);
@@ -264,48 +235,27 @@ namespace {
             }
         }
 
+
         bool isWhileLoop(Loop *L) {
             BasicBlock *header = L->getHeader();
+            BasicBlock *latch = L->getLoopLatch();
+
+            bool BranchingHeader = false;
+            bool UncondBranchLatch = true;
+
             
-            if (BranchInst *BI = dyn_cast<BranchInst>(header->getTerminator())) {
-                if (BI->isConditional()) {
-                    Value *condition = BI->getCondition();
-                    
-                    if (isa<ICmpInst>(condition)) {
-                        for (auto *block : L->getBlocks()) {
-                            if (L->contains(block->getTerminator()->getSuccessor(0))) {
-                                return true; 
-                            }
-                        }
-                    }
-                }
-            }
-            return false; 
-        }
-
-        bool isDoWhile(Loop *L) {
-            BasicBlock *header = L->getHeader();
-
-            for (auto *block : L->getBlocks()) {
-                if (block == header) continue;  // Ignorišemo zaglavlje
-
-                if (BranchInst *BI = dyn_cast<BranchInst>(block->getTerminator())) {
-                    if (BI->isConditional()) {
-                        Value *condition = BI->getCondition();
-
-                        if (isa<ICmpInst>(condition)) {
-                            for (unsigned i = 0; i < BI->getNumSuccessors(); i++) {
-                                if (BI->getSuccessor(i) == header) {
-                                    return true; 
-                                }
-                            }
-                        }
-                    }
-                }
+            
+            if (isa<BranchInst>(header->getTerminator())) {
+                BranchingHeader = true;
             }
 
-            return false; // Ako nema strukture do-while petlje
+            if (BranchInst *BI = dyn_cast<BranchInst>(latch->getTerminator())) {
+                UncondBranchLatch=  !BI->isConditional();
+            }
+
+            return UncondBranchLatch && BranchingHeader; 
         }
+
 
         bool runOnLoop(Loop *L, LPPassManager &LPM) override {
             VariablesMap.clear();
@@ -327,23 +277,17 @@ namespace {
 
             if(LoopBodyBasicBlocks.size() < 1){
                 if(isWhileLoop(L)) {
-                    //errs() << "WHILE!!!\n\n";
+                   // errs() << "WHILE!!!\n\n";
                     LoopBodyBasicBlocks.push_back(Latch);
                     
-                } else if (isDoWhile(L)) {
+                } else {
                     //errs() << "DO WHILE\n\n";
                     LoopBodyBasicBlocks.push_back(Header);      
                 }
-
             }
-
-            // printVariablesMap();
 
             //printf("%d aaaaa\n", LoopBodyBasicBlocks.size());
 
-            // if(LoopBodyBasicBlocks.size() < 1){
-                
-            // }
 
             mapVariables();            
             saveFinalValues();
