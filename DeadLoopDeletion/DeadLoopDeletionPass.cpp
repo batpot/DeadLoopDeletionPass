@@ -2,14 +2,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/IR/CFG.h"
-#include "llvm/IR/PatternMatch.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopUnrollAnalyzer.h"
-#include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils.h"
@@ -18,71 +12,193 @@
 #include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Utils/SizeOpts.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
+
+#include "llvm/Pass.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/PatternMatch.h"
+#include "llvm/Support/raw_ostream.h"
+
+
+#include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/IR/IRBuilder.h"
 
-
+#include <vector>
+#include <map>
 #include <iostream>
 
 using namespace llvm;
 
+
 namespace {
     struct DeadLoopDeletionPass : public LoopPass {
         std::vector<BasicBlock *> LoopBasicBlocks;
+        std::vector<BasicBlock *> LoopBodyBasicBlocks;
+
         std::unordered_map<Value *, Value *> VariablesMap;
-    	Value *LoopCounter, *LoopBound;
-    	bool isLoopBoundConst;
-    	int BoundValue;
+        std::unordered_map<Value *, Value *> FinalValues;
 
         static char ID;
         DeadLoopDeletionPass() : LoopPass(ID) {}
-        
-        void mapVariables(Loop *L)
-  		{
-    		Function *F = L->getHeader()->getParent();
-    		for (BasicBlock &BB : *F) {
-      			for (Instruction &I : BB) {
-        			if (isa<LoadInst>(&I)) {
-          				VariablesMap[&I] = I.getOperand(0);
-        			}
-      			}
-    		}
-  		}
 
-        // brisemo petlje koje 
+
+        void mapVariables() {
+            for (BasicBlock *BB : LoopBodyBasicBlocks) {
+                for (Instruction &I : *BB) {
+                    if (isa<LoadInst>(&I)) {
+                        VariablesMap[&I] = I.getOperand(0);
+                    }
+                }
+            }
+        }
+
+        // hocemo da brisemo petlje koje 
         // - nikad se ne izvrsavaju 
         // - se izvrsavaju ali ne uticu na rezultat 
         // - nemaju bocne efekte
 
-        //isLoopDead --> se izvrsavaju ali ne uticu na rezultat  && nemaju bocne efekte
+
+        void printVariablesMap() {
+            // Prolazi kroz mapu i ispisuje sve parove ključ-vrednost
+            for (const auto &entry : VariablesMap) {
+                Value *fst = entry.first;
+                Value *value = entry.second;
+                
+                // Ispisuje adresu instrukcije i vrednost (operand)
+                errs() << "Value: " << *fst << "\n";
+                errs() << "Mapped to: " << *value << "\n";
+            }
+        }
+
+        void printFinalValuesMap() {
+            // Prolazi kroz mapu i ispisuje sve parove ključ-vrednost
+            for (const auto &entry : FinalValues) {
+                Value *fst = entry.first;
+                Value *value = entry.second;
+                
+                // Ispisuje adresu instrukcije i vrednost (operand)
+                errs() << "Value: " << *fst << "\n";
+                errs() << "Mapped to: " << *value << "\n";
+            }
+        }
 
 
-        // brisemo one petlje koje imaju u sebi load ili store (random funkcija)
-        // bool isLoopDead(Loop* L) {
-        //     BasicBlock *Header = L->getHeader();
-        //     BasicBlock *Latch = L->getLoopLatch();
-        //     SetVector<BasicBlock*> LoopBlocks;
+        bool isConstInt(Value *Operand)
+        {
+            return isa<ConstantInt>(Operand);
+        }
+
+        int getValueFromConstInt(Value *Operand)
+        {
+            ConstantInt *ConstInt = dyn_cast<ConstantInt>(Operand);
+            return ConstInt->getSExtValue();
+        }
+
+
+        void saveFinalValues() {
+            for (BasicBlock *BB : LoopBodyBasicBlocks) {
+                for (Instruction &I : *BB) {
+                    if (StoreInst *storeInst = dyn_cast<StoreInst>(&I)) {
+                        Value *ptr = storeInst->getOperand(1);      
+                        Value *value = storeInst->getOperand(0); // Vrednost koja se upisuje
+                        errs() << "FINAL VAAAAL : " << *ptr << "\n";
+                        errs() << "FV MAPPED TO: " << *value << "\n";
+                        FinalValues[ptr] = value;
+                    }
+                }
+            }
+        }
+
+
+        bool checkIfHasCall() {
+            for (BasicBlock *BB : LoopBodyBasicBlocks) {
+                for (Instruction &I : *BB) {
+                    if (auto *Call = dyn_cast<CallInst>(&I)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        Value* ResolveToBaseVariable(Value *val) {
+            if (LoadInst *loadInst = dyn_cast<LoadInst>(val)) {
+                Value *ptr = loadInst->getPointerOperand();
+                return ResolveToBaseVariable(ptr); // Rekurzivno prati do osnovne promenljive
+            }
+            return val; // Ako nije load instrukcija, vrati trenutnu vrednost
+        }
+
+        bool isUseful(Value *I) { 
+            if (auto *op = dyn_cast<BinaryOperator>(I)) {
+                if (op->getOpcode() == Instruction::Add || op->getOpcode() == Instruction::Sub) {
+                    
+                    // Proveri da li je neki od operanada 0
+                    for (unsigned i = 0; i < op->getNumOperands(); ++i) {
+                        if (ConstantInt *constInt = dyn_cast<ConstantInt>(op->getOperand(i))) {
+                            if (constInt->isZero()) {
+                                return false; // Nekorisna instrukcija
+                            }
+                        }
+                    }
+                }
             
-        //     // Pronađi sve blokove u telu petlje osim zaglavlja i latch
-        //     for (auto *Block : L->blocks()) {
-        //         if (Block == Header || Block == Latch) {
-        //             continue; // Preskoči zaglavlje i latch
-        //         }
-        //         LoopBlocks.insert(Block);
-        //     }
+                if (op->getOpcode() == Instruction::Mul) {
+                    if (ConstantInt *C = dyn_cast<ConstantInt>(op->getOperand(1))) {
+                        if (C->isOne()) {
+                            return false; // Nekorisno ako je množenje sa 1
+                        }
+                    }
+                }
 
-        //     // Prolazak kroz sve blokove tela petlje
-        //     for (auto *Block : LoopBlocks) {
-        //         for (auto &I : *Block) {
-        //             if (isa<LoadInst>(I) || isa<StoreInst>(I) || isa<CallInst>(I)) {
-        //                 errs() << "Instrukcija " << I.getOpcodeName() << " se nalazi u telu petlje u bloku: " << Block->getName() << "\n";
-        //                 return true;
-        //             }
-        //         }
-        //     }
+                if (op->getOpcode() == Instruction::SDiv || op->getOpcode() == Instruction::UDiv) {
+                    if (ConstantInt *C = dyn_cast<ConstantInt>(op->getOperand(1))) {
+                        if (C->isOne()) {
+                            return false; // Nekorisno ako je deljenje sa 1
+                        }
+                    }
+                }
+            }
 
-        //     return true;
-        // }         
-           
+            return true;
+        }
+
+
+        bool shouldDelete() {
+            for (const auto &entry : VariablesMap) {
+                Value *InitialPtr = entry.first;
+                Value *InitialValue = entry.second;
+                errs() << "Valueeeeeeeeee: " << *InitialPtr << "\n";
+                errs() << "Mapped toooooo: " << *InitialValue << "\n";
+
+                Value *ResolvedPtr = ResolveToBaseVariable(InitialValue);
+
+                errs() << "Resolved toooo: " << *ResolvedPtr << "\n";
+
+                if (FinalValues.find(ResolvedPtr) != FinalValues.end()) {
+                    if(isUseful(FinalValues[ResolvedPtr]))
+                        return false;           // ako je bas jedna instrukcija u bloku korisna, ne smemo brisati petlju
+                }
+            }
+            
+            return true;  // Vrednosti su ostale iste
+        }
+
+
+        bool DeleteLoopIfDead(Loop *L) {
+            if(checkIfHasCall())
+                return false;   // petlja ima poziv printf pa nije dead loop
+
+            if(!shouldDelete())
+                return false;   // ako su se vrednosti menjale checkIfValuesChanged vraca true pa ne treba da brisemo petlju
+
+            DeleteDeadLoop(L);
+            return true;
+        }
+
         
         // brise petlju skroz 
         void DeleteDeadLoop(Loop *L) {
@@ -95,75 +211,38 @@ namespace {
                 BB->eraseFromParent();
             }
         }
-        
-        // PROVERA ZA LOOP KOJI SE NIKAD NE IZVRSAVA
-        
-        void findLoopCounterAndBound(Loop *L)
-        {
-        	for (Instruction &I : *L->getHeader()) {
-        		if (isa<ICmpInst>(&I)) {
-        			LoopCounter = VariablesMap[I.getOperand(0)];
-        			if (ConstantInt *ConstInt = dyn_cast<ConstantInt>(I.getOperand(1))) {
-        				isLoopBoundConst = true;
-        				BoundValue = ConstInt->getSExtValue();
-        			}
-        		}
-        	}
-        }
-        
-        bool isNeverExecuted(Loop *L)
-        {
-        	// TODO uopsti da ceo uslov bude neki false condition kao sto je i<0, mozda cak i na manje od 0??
-			if(BoundValue == 0)
-           	{
-            	//errs() << "isNeverExecuted: true" << "\n";
-           		return true;
-            }
-            else
-            {
-            	//errs() << "isNeverExecuted: false, BoundValue=" << BoundValue << "\n";
-              	return false;
-			}
-        }
-        
-
-        bool deleteLoopIfDead(Loop* L) {
-            BasicBlock *Preheader = L->getLoopPreheader();
-            if (!Preheader || !L->hasDedicatedExits())
-                return false;
-
-            // subloops TODO
-
-            BasicBlock *ExitBlock = L->getUniqueExitBlock();
-            if (!ExitBlock) {
-                return false; // required single exit block
-            }
-
-            // if(!isLoopDead(L))
-            //     return false; // loop is not invariant, cannot delete
-
-            if(isNeverExecuted(L))
-            {
-            	//errs() << "loop u f-ji: " << L->getHeader()->getParent()->getName().str()	<< " se nikad ne izvrsava" << "\n";
-            	DeleteDeadLoop(L);
-            	return true;
-            }
-
-			return false;
-        }
 
 
         bool runOnLoop(Loop *L, LPPassManager &LPM) override {
-            //printf("[SOON] This pass will delete dead loops!\n");  
-            mapVariables(L); 
-            findLoopCounterAndBound(L);         
+            VariablesMap.clear();
+            FinalValues.clear();
 
+            LoopBodyBasicBlocks.clear();
             LoopBasicBlocks = L->getBlocksVector();
-            // printf("eeeeeeeeee: %d\n", (int)LoopBasicBlocks.size());
 
-            // Result == obrisana petlja promenjen IR
-            bool Result = deleteLoopIfDead(L);
-            return Result;
+            BasicBlock *Header = L->getHeader();
+            BasicBlock *Latch = L->getLoopLatch();
+
+            // sredisnji blokovi bez header i latch
+            for (BasicBlock *BB : LoopBasicBlocks) {
+                if (BB != Header && BB != Latch) {
+                    LoopBodyBasicBlocks.push_back(BB);
+                }
+            }
+
+            printf("%d aaaaa\n", LoopBodyBasicBlocks.size());
+
+            mapVariables();
+            saveFinalValues();
+
+            bool res = DeleteLoopIfDead(L);
+            if(res)
+                std::cout << "petlja JE obrisana\n";
+            else
+                std::cout << "petlja NIJE obrisana\n";
+
+            //Result == obrisana petlja promenjen IR
+            return res;
         }
 
     };
