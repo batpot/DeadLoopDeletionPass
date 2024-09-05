@@ -190,6 +190,20 @@ namespace {
             return false;
         }
 
+        bool operandsInvariant(Loop *L) {
+            for (BasicBlock *BB : LoopBodyBasicBlocks) {
+                for (Instruction &I : *BB) {
+                    for (Value *Op : I.operands()) {
+                        if (!L->isLoopInvariant(Op)) {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
+
 
         bool shouldDelete(Loop *L) {
             if(isNeverExecuted(L))
@@ -197,6 +211,12 @@ namespace {
 
             if(checkIfHasCall())
                 return false;   // petlja ima poziv printf pa nije dead loop
+
+            if(operandsInvariant(L)) {
+                //errs() << "INVARIJANTNO OMG\n\n";
+                return true;
+            }
+
 
 
             for (const auto &entry : VariablesMap) {
