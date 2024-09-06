@@ -134,9 +134,10 @@ namespace {
 
 
         bool isUseful(Value *I) { 
+
             if (auto *op = dyn_cast<BinaryOperator>(I)) {
-                if (op->getOpcode() == Instruction::Add || op->getOpcode() == Instruction::Sub) {
-                    
+
+                if (op->getOpcode() == Instruction::Add) {
                     // Proveri da li je neki od operanada 0
                     for (unsigned i = 0; i < op->getNumOperands(); ++i) {
                         if (ConstantInt *constInt = dyn_cast<ConstantInt>(op->getOperand(i))) {
@@ -146,7 +147,16 @@ namespace {
                         }
                     }
                 }
-            
+
+                if (op->getOpcode() == Instruction::Sub) {
+                    if (ConstantInt *constInt = dyn_cast<ConstantInt>(op->getOperand(1))) {
+                        if (constInt->isZero()) {
+                            return false; // Nekorisna instrukcija
+                        }
+                    }
+                    
+                }
+
                 if (op->getOpcode() == Instruction::Mul) {
                     for (int i = 0; i < 2; i++) {
                         if (ConstantInt *C = dyn_cast<ConstantInt>(op->getOperand(i))) {
@@ -168,26 +178,6 @@ namespace {
             }
 
             return true;
-        }
-
-
-        bool hasArithmeticOperations()
-        {
-          // ako ima samo store brisemo
-            for (BasicBlock *BB : LoopBodyBasicBlocks) {
-                for (Instruction &I : *BB) {
-                    if (isa<BinaryOperator>(&I)) {
-                        if (isa<AddOperator>(&I) || isa<MulOperator>(&I)
-                              || isa<SDivOperator>(&I) || isa<SubOperator>(&I)) {
-                            //errs() << "ima add ili mul ili div ili sub" << "\n";
-                            return true; // ne brisemo
-                        }
-
-                    }
-                }
-            }
-
-            return false;
         }
 
         bool operandsInvariant(Loop *L) {
@@ -213,10 +203,9 @@ namespace {
                 return false;   // petlja ima poziv printf pa nije dead loop
 
             if(operandsInvariant(L)) {
-                //errs() << "INVARIJANTNO OMG\n\n";
+                //errs() << "INVARIJANTNO OMG\n\n";s
                 return true;
             }
-
 
 
             for (const auto &entry : VariablesMap) {
@@ -227,12 +216,11 @@ namespace {
                 // errs() << "Mapped tooo: " << *InitialValue << "\n";
                 // errs() << "Resolved to: " << *ResolvedPtr << "\n\n";
 
-                if(!isUseful(ResolvedPtr))
-                    return true;
+                if(isUseful(ResolvedPtr)) {
+                    return false;
+                }
             }
 
-            if(hasArithmeticOperations())    // ako ovde vrati true, to znaci da ima aritmeticke operacije koje su korisne
-                return false;
             
             return true;  // Vrednosti su ostale iste
         }
